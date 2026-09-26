@@ -1,0 +1,140 @@
+buildscript {
+    repositories { maven { url = 'https://maven.minecraftforge.net/' }; mavenCentral() }
+    dependencies { classpath 'org.spongepowered:mixingradle:0.7.38' }
+}
+plugins {
+    id 'eclipse'
+    id 'net.minecraftforge.gradle' version '6.0.54'
+}
+apply plugin: 'org.spongepowered.mixin'
+
+version = mod_version
+group = mod_group
+base { archivesName = mod_archive }
+java.toolchain.languageVersion = JavaLanguageVersion.of(17)
+
+mixin {
+    add sourceSets.main, "${mod_id}.refmap.json"
+    config "${mod_id}.mixins.json"
+}
+
+sourceSets {
+    gameTest {
+        compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
+        runtimeClasspath += sourceSets.main.output + sourceSets.main.runtimeClasspath
+    }
+    // Test-only agent mod (immersive_apotheosis_smoketest): a fresh flat world, Apotheosis's tables opened through
+    // their blocks, performances started through the real button and slot paths and played with key events, server
+    // state checked, screenshots saved, smoketest-result.json written, then quit. Used by runClient -PsmokeTest.
+    smokeTest {
+        compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
+        runtimeClasspath += sourceSets.main.output + sourceSets.main.runtimeClasspath
+    }
+}
+
+minecraft {
+    mappings channel: 'official', version: minecraft_version
+    copyIdeResources = true
+    runs {
+        configureEach {
+            workingDirectory project.file('run')
+            property 'forge.logging.console.level', 'info'
+            property 'forge.enabledGameTestNamespaces', mod_id
+            property 'mixin.env.remapRefMap', 'true'
+            property 'mixin.env.refMapRemappingFile', "${projectDir}/build/createSrgToMcp/output.srg"
+            mods { immersive_apotheosis { source sourceSets.main } }
+        }
+        client {
+            if (project.hasProperty('smokeTest')) {
+                property 'immersive_apotheosis.smoketest.output', file('run/smoketest').absolutePath
+                mods { immersive_apotheosis_smoketest { source sourceSets.smokeTest } }
+            }
+        }
+        server { args '--nogui' }
+        gameTestServer {
+            workingDirectory project.file('run-gametest')
+            mods { immersive_apotheosis { source sourceSets.gameTest } }
+        }
+    }
+}
+
+repositories {
+    flatDir { dirs 'libs' }
+    maven {
+        url = 'https://api.modrinth.com/maven'
+        content { includeGroup 'maven.modrinth' }
+    }
+    maven { url = 'https://maven.theillusivec4.top/' }
+}
+
+dependencies {
+    minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
+    annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
+
+    // Apotheosis is the reason this mod exists: always on the dev runtime.
+    implementation fg.deobf("maven.modrinth:apotheosis:${apotheosis_modrinth_id}")
+    implementation fg.deobf("maven.modrinth:placebo:${placebo_modrinth_id}")
+    implementation fg.deobf("maven.modrinth:apothic-attributes:${apothic_attributes_modrinth_id}")
+    runtimeOnly fg.deobf("maven.modrinth:patchouli:${patchouli_modrinth_id}")
+
+    // Sister mods (bridge/<mod>, reached only after a ModList check). -PnoSmithing etc. test each absence.
+    for (def sister : ['smithing', 'tanning', 'jewelry', 'enchanting']) {
+        def coordinate = "local:immersive-${sister}:${project.property("immersive_${sister}_version")}"
+        compileOnly fg.deobf(coordinate)
+        if (!project.hasProperty("no${sister.capitalize()}")) runtimeOnly fg.deobf(coordinate)
+    }
+    // Jewelry's equipment slots; Jewelry falls back to built-in slots without it. The API is for the GameTests only.
+    compileOnly fg.deobf("top.theillusivec4.curios:curios-forge:${curios_version}:api")
+    if (!project.hasProperty('noCurios')) runtimeOnly fg.deobf("top.theillusivec4.curios:curios-forge:${curios_version}")
+    // ApothicCurios only for -PapothicCurios runs (the exclusion mixin targets it by name; no compile dependency).
+    if (project.hasProperty('apothicCurios')) runtimeOnly fg.deobf("local:apothic-curios:${apothic_curios_version}")
+
+    testImplementation "org.junit.jupiter:junit-jupiter:${junit_version}"
+    testRuntimeOnly "org.junit.platform:junit-platform-launcher:${junit_platform_version}"
+}
+
+test {
+    useJUnitPlatform()
+    testLogging { events 'failed'; exceptionFormat 'full' }
+}
+
+tasks.named('processResources', ProcessResources).configure {
+    def properties = [mod_id: mod_id, mod_name: mod_name, mod_version: mod_version, mod_license: mod_license,
+                      mod_authors: mod_authors, minecraft_version_range: minecraft_version_range,
+                      forge_version_range: forge_version_range, loader_version_range: loader_version_range,
+                      apotheosis_version_range: apotheosis_version_range]
+    inputs.properties properties
+    filesMatching('META-INF/mods.toml') { expand properties }
+}
+
+tasks.named('processSmokeTestResources', ProcessResources).configure {
+    inputs.properties mod_version: mod_version, mod_license: mod_license
+    filesMatching('META-INF/mods.toml') { expand mod_version: mod_version, mod_license: mod_license }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
+// The agent as a mod jar for tools/packtest (a full modpack). Never shipped.
+tasks.register('smokeTestJar', Jar) {
+    archiveClassifier = 'smoketest'
+    from sourceSets.smokeTest.output
+    exclude "${mod_id}.refmap.json"
+    manifest.attributes('Implementation-Title': 'immersive_apotheosis_smoketest', 'Implementation-Version': mod_version)
+}
+
+reobf {
+    // The agent calls inherited Minecraft methods on this mod's and Apotheosis's types, so reobf must see them.
+    smokeTestJar { libraries.from(sourceSets.smokeTest.compileClasspath) }
+}
+
+tasks.named('smokeTestJar') { finalizedBy 'reobfSmokeTestJar' }
+
+tasks.named('jar', Jar).configure {
+    manifest.attributes('Specification-Title': mod_id, 'Specification-Vendor': mod_authors,
+                        'Specification-Version': '1', 'Implementation-Title': project.name,
+                        'Implementation-Version': mod_version, 'Implementation-Vendor': mod_authors,
+                        'MixinConfigs': "${mod_id}.mixins.json")
+    finalizedBy 'reobfJar'
+}

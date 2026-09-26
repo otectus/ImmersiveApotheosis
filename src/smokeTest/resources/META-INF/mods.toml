@@ -1,0 +1,19 @@
+modLoader="javafml"
+loaderVersion="[47,)"
+license="${mod_license}"
+
+[[mods]]
+modId="immersive_apotheosis_smoketest"
+version="${mod_version}"
+displayName="Immersive Apotheosis Smoke Test Agent"
+authors="Otectus"
+description='''
+Test-only agent. Inert unless -Dimmersive_apotheosis.smoketest.output is set. Never ship this.
+'''
+
+[[dependencies.immersive_apotheosis_smoketest]]
+    modId="immersive_apotheosis"
+    mandatory=true
+    versionRange="[${mod_version},)"
+    ordering="AFTER"
+    side="BOTH"

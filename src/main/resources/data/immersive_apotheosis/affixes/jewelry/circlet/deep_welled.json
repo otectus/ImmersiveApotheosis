@@ -1,0 +1,46 @@
+{
+  "conditions": [
+    {
+      "type": "forge:mod_loaded",
+      "modid": "irons_spellbooks"
+    }
+  ],
+  "type": "apotheosis:attribute",
+  "attribute": "irons_spellbooks:max_mana",
+  "operation": "ADDITION",
+  "values": {
+    "common": {
+      "min": 25,
+      "steps": 5,
+      "step": 5
+    },
+    "uncommon": {
+      "min": 35,
+      "steps": 5,
+      "step": 5
+    },
+    "rare": {
+      "min": 50,
+      "steps": 5,
+      "step": 5
+    },
+    "epic": {
+      "min": 60,
+      "steps": 6,
+      "step": 5
+    },
+    "mythic": {
+      "min": 75,
+      "steps": 8,
+      "step": 5
+    },
+    "ancient": {
+      "min": 100,
+      "steps": 10,
+      "step": 5
+    }
+  },
+  "types": [
+    "immersive_apotheosis:circlet"
+  ]
+}
