@@ -11,6 +11,7 @@
     "ItemCombinerMenuMixin",
     "ReforgingMenuInvoker",
     "ReforgingMenuMixin",
+    "SalvagingMenuInvoker",
     "SalvagingMenuMixin",
     "SmithingMenuAccessor"
   ],

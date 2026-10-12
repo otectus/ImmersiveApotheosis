@@ -4,6 +4,7 @@ import com.otectus.immersiveapotheosis.config.ServerConfig;
 import com.otectus.immersiveapotheosis.minigame.WorkResult;
 import com.otectus.immersiveapotheosis.minigame.Performance;
 import com.otectus.immersiveapotheosis.minigame.Station;
+import com.otectus.immersiveapotheosis.mixin.SalvagingMenuInvoker;
 import com.otectus.immersiveapotheosis.session.PerformanceSessions;
 import com.otectus.immersiveapotheosis.session.Permissions;
 import dev.shadowsoffire.apotheosis.adventure.affix.salvaging.SalvagingMenu;
@@ -16,7 +17,6 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
-import net.minecraftforge.items.ItemHandlerHelper;
 import net.minecraftforge.items.SlotItemHandler;
 
 /**
@@ -80,7 +80,9 @@ public final class SalvagingStation {
                 stack = output.getItemHandler().insertItem(output.getSlotIndex(), stack, false);
             }
         }
-        if (!stack.isEmpty()) ItemHandlerHelper.giveItemToPlayer(player, stack);
+        // The remainder goes through Apotheosis's own giveItem, as salvageAll does, so mods hooking that method
+        // (Runic Skills' salvage bonus, for one) see performed salvage exactly as they see an instant one.
+        if (!stack.isEmpty()) ((SalvagingMenuInvoker) menu).immersiveapotheosis$giveItem(player, stack);
     }
 
     record Context(ItemStack[] inputs, int tier) implements PerformanceSessions.Context {

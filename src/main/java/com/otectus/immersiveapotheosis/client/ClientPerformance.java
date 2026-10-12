@@ -17,7 +17,9 @@ import net.minecraft.Util;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
+import net.minecraft.ChatFormatting;
 import net.minecraft.client.resources.sounds.SimpleSoundInstance;
+import net.minecraft.network.chat.Component;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.ScreenEvent;
@@ -33,7 +35,13 @@ import java.util.ArrayDeque;
 import java.util.List;
 import java.util.Optional;
 
-/** Captures real GUI pointer work and predicts the server-owned deterministic workbench. */
+/**
+ * Captures real GUI pointer work and predicts the server-owned deterministic workbench. The server's verdict stays on
+ * the overlay until the player dismisses it (Esc, Enter, the work key or a click, after a short grace so the stroke
+ * that finished the work cannot dismiss it); a key still held from the work, or its auto-repeat, never counts. If the
+ * menu closes first - or the verdict arrives after it closed, as an abandonment charged on closing does - it is written
+ * to chat instead, so the outcome can always be read.
+ */
 @Mod.EventBusSubscriber(modid = ImmersiveApotheosis.MOD_ID, value = Dist.CLIENT)
 public final class ClientPerformance {
     public static final KeyMapping PERFORM = new KeyMapping("key.immersive_apotheosis.perform",
@@ -42,8 +50,11 @@ public final class ClientPerformance {
             KeyConflictContext.GUI, InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_LEFT_SHIFT, "key.categories.immersive_apotheosis");
     private static final int MAX_CATCHUP = 25;
     private static final int FLUSH_STEPS = 5;
-    private static final long VERDICT_SHOWN_MS = 2500;
+    private static final long VERDICT_DISMISS_GRACE_MS = 750;
     @Nullable private static Run run;
+    /** A run whose overlay closed before its verdict arrived: the late verdict goes to chat. */
+    @Nullable private static StartS2C closedBeforeVerdict;
+    @Nullable private static Component lastChatVerdict;
 
     static final class Run {
         final StartS2C start;
@@ -63,6 +74,8 @@ public final class ClientPerformance {
         WorkStage soundedStage;
         @Nullable ResolvedS2C verdict;
         long verdictMs;
+        /** Keys down since the work began; a repeat of one of these is not a new press. */
+        final java.util.Set<Integer> heldKeys = new java.util.HashSet<>();
 
         Run(StartS2C start) {
             this.start = start;
@@ -173,7 +186,13 @@ public final class ClientPerformance {
     }
 
     public static void resolved(ResolvedS2C message) {
-        if (run == null || !run.start.session().equals(message.session())) return;
+        if (run == null || !run.start.session().equals(message.session())) {
+            if (closedBeforeVerdict != null && closedBeforeVerdict.session().equals(message.session())) {
+                toChat(closedBeforeVerdict, message);
+                closedBeforeVerdict = null;
+            }
+            return;
+        }
         run.releaseTools();
         run.pending.clear();
         run.observations.clear();
@@ -189,6 +208,8 @@ public final class ClientPerformance {
     public static Optional<WorkInput> input() { return run == null ? Optional.empty() : Optional.of(run.heldSample); }
     public static int step() { return run == null ? Integer.MIN_VALUE : run.clockSteps(); }
     public static Optional<ResolvedS2C> verdict() { return run == null ? Optional.empty() : Optional.ofNullable(run.verdict); }
+    /** The last verdict written to chat because its overlay had closed. For the client smoke test. */
+    public static Optional<Component> lastChatVerdict() { return Optional.ofNullable(lastChatVerdict); }
     public record Workspace(int left, int top, int width, int height) {}
     public static Optional<Workspace> workspace() { return run == null ? Optional.empty() : Optional.of(PerformanceOverlay.workspace()); }
 
@@ -201,6 +222,31 @@ public final class ClientPerformance {
         run.advance(); // Always score the previously observed pointer state before replacing it.
         run.pointer(x, y, screen);
         run.observe();
+    }
+
+    /** The overlay goes away without the player dismissing it: a verdict (present or still to come) goes to chat. */
+    private static void discard() {
+        if (run == null) return;
+        if (run.verdict != null) toChat(run.start, run.verdict);
+        else closedBeforeVerdict = run.start;
+        run = null;
+    }
+
+    private static void toChat(StartS2C start, ResolvedS2C verdict) {
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft.player == null) return;
+        Component line = verdict.band() == null
+                ? Component.translatable("performance.immersive_apotheosis.chat_verdict_plain", start.title(), verdict.summary())
+                : Component.translatable("performance.immersive_apotheosis.chat_verdict", start.title(),
+                        Component.translatable("performance.immersive_apotheosis.band." + verdict.band().id)
+                                .withStyle(verdict.band().isFailure() ? ChatFormatting.RED : ChatFormatting.GOLD),
+                        Math.round(verdict.score()), verdict.summary());
+        minecraft.gui.getChat().addMessage(line);
+        lastChatVerdict = line;
+    }
+
+    private static boolean dismissable() {
+        return run.verdict != null && Util.getMillis() - run.verdictMs >= VERDICT_DISMISS_GRACE_MS;
     }
 
     private static void escape() {
@@ -233,6 +279,11 @@ public final class ClientPerformance {
 
     @SubscribeEvent public static void onMousePressed(ScreenEvent.MouseButtonPressed.Pre event) {
         if (!active(event)) return;
+        if (run.verdict != null) {
+            if (dismissable()) run = null;
+            event.setCanceled(true);
+            return;
+        }
         updatePointer(event.getMouseX(), event.getMouseY(), (AbstractContainerScreen<?>) event.getScreen());
         if (run.inside && !run.submitted && event.getButton() == GLFW.GLFW_MOUSE_BUTTON_LEFT) run.primaryMouse = true;
         if (run.inside && !run.submitted && event.getButton() == GLFW.GLFW_MOUSE_BUTTON_RIGHT) run.secondaryMouse = true;
@@ -257,16 +308,25 @@ public final class ClientPerformance {
 
     @SubscribeEvent public static void onKeyPressed(ScreenEvent.KeyPressed.Pre event) {
         if (!active(event)) return;
+        boolean fresh = run.heldKeys.add(event.getKeyCode());
         run.advance();
-        if (event.getKeyCode() == GLFW.GLFW_KEY_ESCAPE) escape();
-        else if (run.inside && !run.submitted && PERFORM.isActiveAndMatches(InputConstants.getKey(event.getKeyCode(), event.getScanCode()))) run.primaryKey = true;
-        else if (run.inside && !run.submitted && CONTEXT.isActiveAndMatches(InputConstants.getKey(event.getKeyCode(), event.getScanCode()))) run.secondaryKey = true;
+        InputConstants.Key pressed = InputConstants.getKey(event.getKeyCode(), event.getScanCode());
+        if (event.getKeyCode() == GLFW.GLFW_KEY_ESCAPE) {
+            // A held Esc repeats: only a second, separate press confirms an abandon.
+            if (fresh) escape();
+        } else if (run.verdict != null) {
+            boolean dismissKey = event.getKeyCode() == GLFW.GLFW_KEY_ENTER || event.getKeyCode() == GLFW.GLFW_KEY_KP_ENTER
+                    || PERFORM.isActiveAndMatches(pressed);
+            if (fresh && dismissKey && dismissable()) run = null;
+        } else if (run.inside && !run.submitted && PERFORM.isActiveAndMatches(pressed)) run.primaryKey = true;
+        else if (run.inside && !run.submitted && CONTEXT.isActiveAndMatches(pressed)) run.secondaryKey = true;
         if (run != null) { run.observe(); run.flush(); }
         event.setCanceled(true);
     }
 
     @SubscribeEvent public static void onKeyReleased(ScreenEvent.KeyReleased.Pre event) {
         if (!active(event)) return;
+        run.heldKeys.remove(event.getKeyCode());
         run.advance();
         if (PERFORM.isActiveAndMatches(InputConstants.getKey(event.getKeyCode(), event.getScanCode()))) {
             if (run.primaryKey && run.simulation.state() instanceof ReforgeState state && state.hammerCharge() >= .35)
@@ -296,7 +356,7 @@ public final class ClientPerformance {
             run.advance();
             run.releaseTools();
             run.flush();
-            run = null;
+            discard();
         }
     }
 
@@ -305,11 +365,10 @@ public final class ClientPerformance {
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft.player == null || !(minecraft.screen instanceof AbstractContainerScreen<?>)) {
             run.releaseTools();
-            run = null;
+            discard();
             return;
         }
         run.advance();
-        if (run.verdict != null && Util.getMillis() - run.verdictMs > VERDICT_SHOWN_MS) run = null;
     }
 
     private static void sound(net.minecraft.sounds.SoundEvent event, float pitch) {

@@ -1,6 +1,7 @@
 package com.otectus.immersiveapotheosis.session;
 
 import com.otectus.immersiveapotheosis.ImmersiveApotheosis;
+import com.otectus.immersiveapotheosis.api.ImmersiveApotheosisAPI;
 import com.otectus.immersiveapotheosis.config.ServerConfig;
 import com.otectus.immersiveapotheosis.minigame.OutcomeBand;
 import com.otectus.immersiveapotheosis.minigame.Station;
@@ -69,7 +70,10 @@ public final class PerformanceSessions {
         if (SESSIONS.containsKey(player.getUUID()) || player.containerMenu != menu || !menu.stillValid(player)
                 || !context.stillValid(player, menu)) return;
         long seed = player.getRandom().nextLong();
-        double window = ServerConfig.get(ServerConfig.TIMING_WINDOW_MULTIPLIER);
+        // The server's window times the per-player assistance other mods contribute (skills, accessibility), kept
+        // inside the range WorkDefinition accepts. The client receives the final value and simulates the same work.
+        double window = Math.max(ImmersiveApotheosisAPI.MIN_ASSISTANCE, Math.min(ImmersiveApotheosisAPI.MAX_ASSISTANCE,
+                ServerConfig.get(ServerConfig.TIMING_WINDOW_MULTIPLIER) * ImmersiveApotheosisAPI.assistance(player, context.station())));
         WorkDefinition definition = new WorkDefinition(context.station(), context.tier(), seed, window);
         Session session = new Session(UUID.randomUUID(), player, menu, context, WorkSimulation.create(definition),
                 new InputSequence(), SessionClock.now());

@@ -1,6 +1,7 @@
 package com.otectus.immersiveapotheosis;
 
 import com.mojang.logging.LogUtils;
+import com.otectus.immersiveapotheosis.api.ImmersiveApotheosisAPI;
 import com.otectus.immersiveapotheosis.bridge.BridgeBootstrap;
 import com.otectus.immersiveapotheosis.category.JewelryCategories;
 import com.otectus.immersiveapotheosis.category.JewelryGemBonuses;
@@ -24,6 +25,7 @@ public class ImmersiveApotheosis {
         IEventBus modBus = FMLJavaModLoadingContext.get().getModEventBus();
         ModLoadingContext.get().registerConfig(ModConfig.Type.SERVER, ServerConfig.SPEC);
         modBus.addListener(this::commonSetup);
+        modBus.addListener(ImmersiveApotheosisAPI::processIMC);
     }
 
     private void commonSetup(final FMLCommonSetupEvent event) {

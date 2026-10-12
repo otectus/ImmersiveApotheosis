@@ -249,6 +249,20 @@ public final class ClientSmokeTest {
             server(s -> server.put("salvage_inputs_kept", !player(s).containerMenu.getSlot(0).getItem().isEmpty()));
         });
         check("salvage_inputs_kept");
+        act("dismiss cancel verdict", 2, mc -> key(mc, GLFW.GLFW_KEY_ENTER));
+        step("cancel verdict dismissed", 40, mc -> ClientPerformance.view().isEmpty());
+
+        // 5. The menu closes mid-work, as a broken table or the server would close it: the abandonment verdict
+        //    arrives after the overlay is gone, so it must land in chat with what it cost.
+        act("click salvage abandon", 2, mc -> mc.gameMode.handleInventoryButtonClick(mc.player.containerMenu.containerId, 0));
+        step("salvage abandon started", 100, mc -> ClientPerformance.view().isPresent());
+        step("past count-in", 200, mc -> ClientPerformance.step() > WorkDefinition.COUNT_IN_STEPS + 20);
+        act("server closes the menu", 4, mc -> server(s -> player(s).closeContainer()));
+        step("abandon verdict in chat", 100, mc -> mc.screen == null && ClientPerformance.lastChatVerdict().isPresent());
+        act("abandon checked", 2, mc -> {
+            checks.put("closed_menu_verdict_in_chat", ClientPerformance.lastChatVerdict().map(c -> c.getString()).orElse(""));
+            checks.put("closed_menu_verdict_reached_chat", ClientPerformance.lastChatVerdict().isPresent());
+        });
 
         if (PACK) {
             act("pack checks", 10, mc -> server(s -> {
@@ -327,6 +341,10 @@ public final class ClientSmokeTest {
             verify.run();
             if (v.band() == null || !v.band().grantsFull()) finish(mc, false, name + " gesture failed");
         });
+        // The verdict stays until dismissed (it used to vanish after 2.5 s): still there after 3 s, gone on Enter.
+        act(name + " verdict held", 50, mc -> { });
+        act(name + " verdict still shown", 1, mc -> checks.put(name + "_verdict_persists", ClientPerformance.verdict().isPresent()));
+        act(name + " dismiss", 2, mc -> key(mc, GLFW.GLFW_KEY_ENTER));
         step(name + " overlay cleared", 200, mc -> ClientPerformance.view().isEmpty());
     }
 
@@ -356,12 +374,17 @@ public final class ClientSmokeTest {
                     mc.options.enableVsync().set(false);
                     mc.options.framerateLimit().set(120);
                     mc.getTutorial().setStep(net.minecraft.client.tutorial.TutorialSteps.NONE);
-                    sizeWindow(mc, 1280, 720);
+                    sizeWindow(mc, VisualValidationHarness.enabled() ? 960 : 1280, 720);
+                    VisualValidationHarness.configure(mc);
                 }
                 if (mc.screen instanceof TitleScreen && titleTicks == 40 && !worldRequested) {
                     worldRequested = true;
                     createWorld(mc);
                 }
+                return;
+            }
+            if (StoreScreenshots.enabled()) {
+                StoreScreenshots.tick(mc);
                 return;
             }
             if (stepIndex >= steps.size()) {
@@ -625,6 +648,7 @@ public final class ClientSmokeTest {
 
     private static void finish(Minecraft mc, boolean pass, String reason) {
         finished = true;
+        pass &= VisualValidationHarness.finish(mc);
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("pass", pass);
         result.put("reason", reason);

@@ -75,8 +75,12 @@ _What you are working on right now. One or two lines._
 
 ## Decisions
 
-_Choices that should not be re-litigated every session (why a system was built a
-certain way, APIs deliberately avoided, balance rules, naming rules)._
+- 1.1.0: `api/ImmersiveApotheosisAPI` is the only public surface. `IPerformanceAssistSource` multiplies the
+  configured assistance window per player at `PerformanceSessions.start` (product clamped to 0.5..2.0, the range
+  `WorkDefinition` accepts); the client receives the final window in `StartS2C`, so no protocol change.
+- Performed salvage delivers the remainder through Apotheosis's protected `SalvagingMenu#giveItem` (via
+  `SalvagingMenuInvoker`), as `salvageAll` does, so hooks on that method (Runic Skills' salvage bonus) apply to
+  performed and instant salvage alike.
 
 ## Known issues
 

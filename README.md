@@ -32,7 +32,9 @@ existing table. The highlighted workpiece, tool targets and stage instructions s
 
 Familiar operations target 20–40 seconds, with up to 60 seconds to finish. Rarer work adds components, facets or
 anchors. A completed operation resolves immediately; the time limit judges unfinished work, while an abandoned
-or disconnected session follows the existing failure rules. Esc once asks to abandon; Esc again confirms.
+or disconnected session follows the existing failure rules. Esc once asks to abandon; Esc again confirms (a held Esc
+does not). The verdict stays on the table until you dismiss it (Esc, Enter or a click); if the menu closes first, the
+verdict is written to chat.
 
 The score (0–100) gives the existing outcome band: **Perfect** 90+, **Stable** 80+, **Frayed** 65+, **Weak** 50+,
 **Failed** 35+, **Shattered** below 35. Essential unfinished stages cannot grant a successful setting, cut or reforge.
@@ -139,6 +141,19 @@ borrowed one).
 - **Immersive Enchanting** has its own Apotheosis enchanting-table support; nothing here changes enchanting.
 - **EasyMagic** does not take over Apotheosis's enchanting table.
 - Clients need the mod: performances are drawn and played on the client, and the server judges them.
+
+## Java API
+
+`com.otectus.immersiveapotheosis.api.ImmersiveApotheosisAPI`. Register during mod construction or
+`FMLCommonSetupEvent`, or send an IMC message to `immersive_apotheosis` whose method is `assist_source` and whose
+payload is a `Supplier<IPerformanceAssistSource>`.
+
+- `IPerformanceAssistSource.windowMultiplier(player, station)`: per-player crafting assistance. When a performance
+  starts, the server's `timingWindowMultiplier` is multiplied by every registered source's answer (each clamped to
+  0.5..2.0, the product clamped again), and the client receives and simulates that final window. A skill mod widens
+  the window for a practised player this way; the server still judges every input.
+- Performed salvaging hands the outputs the table cannot hold to Apotheosis's own `SalvagingMenu#giveItem`, exactly
+  as an instant salvage does, so a mod that hooks that method sees performed salvage too.
 
 ## Building and testing
 
